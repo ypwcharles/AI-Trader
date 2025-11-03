@@ -4,18 +4,21 @@ Simple trading-hour scheduler for AI-Trader.
 
 Runs scripts/run_all.py automatically during US market regular session
 (09:30–16:00 America/New_York) at a configurable minute of each hour
-(default :30), Monday–Friday. Skips weekends. Uses a small state file to
-avoid duplicate runs per slot and a lock to prevent overlapping jobs.
+(default :30), Monday–Friday. Skips weekends, and optionally skips
+US market holidays. Uses a small state file to avoid duplicate runs
+per slot and a lock to prevent overlapping jobs.
 
 Environment variables (override defaults):
   MARKET_TZ=America/New_York
   MARKET_OPEN=09:30
   MARKET_CLOSE=16:00
-  RUN_MINUTE=30              # minute of each hour to run (0–59)
-  PERIOD_MINUTES=60          # run every N minutes inside window
-  RUN_ONCE_IF_IN_WINDOW=0    # if 1, run once then exit if in window now
+  RUN_MINUTE=30                 # minute of each hour to run (0–59)
+  PERIOD_MINUTES=60             # run every N minutes inside window
+  SKIP_HOLIDAYS=1               # skip US market holidays when 1
+  RUN_ONCE_IF_IN_WINDOW=0       # if 1, run once then exit if in window now
+  CATCH_UP_OPEN=1               # if 1, when started after open, run once immediately for the open slot
   SCHED_CONFIG=configs/default_config.json  # forwarded to run_all.py
-  RUN_TODAY=1                # forwarded so main.py uses market-aware dates
+  RUN_TODAY=1                   # forwarded so main.py uses market-aware dates
 
 Usage:
   python scripts/scheduler.py          # daemon loop (Ctrl+C to stop)
@@ -51,6 +54,8 @@ class ScheduleCfg:
     period_minutes: int = int(os.getenv("PERIOD_MINUTES", "60"))
     once: bool = os.getenv("RUN_ONCE_IF_IN_WINDOW", "0").strip().lower() in ("1", "true", "yes", "on")
     config: str = os.getenv("SCHED_CONFIG", str(ROOT / "configs" / "default_config.json"))
+    skip_holidays: bool = os.getenv("SKIP_HOLIDAYS", "1").strip().lower() in ("1", "true", "yes", "on")
+    catch_up_open: bool = os.getenv("CATCH_UP_OPEN", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _now_market(cfg: ScheduleCfg) -> datetime:
@@ -75,7 +80,32 @@ def _in_window(now_mkt: datetime, cfg: ScheduleCfg) -> bool:
     # Monday=0 ... Friday=5
     if now_mkt.weekday() >= 5:
         return False
+    if cfg.skip_holidays and _is_market_holiday(now_mkt.date()):
+        return False
     return start <= now_mkt < end
+
+
+def _holiday_provider():
+    """Return a callable(date) -> bool for US market holidays.
+    Tries holidays.financial.NYSE, then holidays.NYSE; falls back to no-holidays.
+    """
+    try:
+        from holidays.financial import NYSE  # type: ignore
+        cal = NYSE()
+        return lambda d: d in cal
+    except Exception:
+        try:
+            import holidays  # type: ignore
+            if hasattr(holidays, "NYSE"):
+                cal = holidays.NYSE()
+                return lambda d: d in cal
+        except Exception:
+            pass
+    # Fallback: no holiday
+    return lambda d: False
+
+
+_is_market_holiday = _holiday_provider()
 
 
 def _slot_key(now_mkt: datetime, cfg: ScheduleCfg) -> str:
@@ -166,6 +196,22 @@ def loop(cfg: ScheduleCfg) -> None:
     state = _load_state()
     print("[scheduler] Started with:", cfg)
     try:
+        # Optional catch-up at market open slot, if starting after open
+        if cfg.catch_up_open:
+            now0 = _now_market(cfg)
+            if _in_window(now0, cfg):
+                oh, om = _parse_hm(cfg.open_hm)
+                open_slot = now0.replace(hour=oh, minute=om, second=0, microsecond=0)
+                open_key = open_slot.strftime("%Y-%m-%d %H:%M")
+                if now0 >= open_slot and state.get(open_key) != "done":
+                    if _acquire_lock():
+                        try:
+                            print("[scheduler] Catch-up: running open slot", open_key)
+                            rc = run_once(cfg)
+                            state[open_key] = "done" if rc == 0 else f"rc={rc}"
+                            _save_state(state)
+                        finally:
+                            _release_lock()
         while True:
             now_mkt = _now_market(cfg)
             if _should_run_now(now_mkt, cfg):
@@ -218,4 +264,3 @@ if __name__ == "__main__":
             sys.exit(0)
     else:
         loop(cfg)
-
