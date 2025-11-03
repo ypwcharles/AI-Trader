@@ -151,18 +151,39 @@ class DataLoader {
         return prices;
     }
 
+    // Resolve a date key for a prices dictionary that may be hourly or daily
+    _resolveDateKey(prices, date) {
+        if (!prices) return date;
+        // If exact match exists, use it
+        if (prices[date]) return date;
+        const hasHourly = Object.keys(prices).some(k => k.includes(':'));
+        const isDailyInput = !date.includes(':');
+        if (hasHourly && isDailyInput) {
+            // Find last available bar for that day
+            const prefix = `${date} `;
+            const candidates = Object.keys(prices).filter(k => k.startsWith(prefix)).sort();
+            if (candidates.length > 0) {
+                return candidates[candidates.length - 1];
+            }
+        }
+        return date;
+    }
+
     // Get closing price for a symbol on a specific date
     async getClosingPrice(symbol, date) {
         const prices = await this.loadStockPriceEnsure(symbol, date);
-        if (!prices || !prices[date]) {
+        if (!prices) {
             return null;
         }
-        const close = prices[date]['4. close'];
+        const key = this._resolveDateKey(prices, date);
+        const bar = prices[key];
+        if (!bar) return null;
+        const close = bar['4. close'];
         if (close !== undefined && close !== null && close !== '') {
             return parseFloat(close);
         }
         // Fallback: if close is not available (e.g., intraday), use today's buy price to estimate
-        const openBuy = prices[date]['1. buy price'] || prices[date]['1. open'];
+        const openBuy = bar['1. buy price'] || bar['1. open'];
         return openBuy ? parseFloat(openBuy) : null;
     }
 
