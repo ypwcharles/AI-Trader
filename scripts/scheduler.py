@@ -32,7 +32,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -239,8 +239,9 @@ def loop(cfg: ScheduleCfg) -> None:
                     else:
                         print("[scheduler] Another run appears active; skipping this slot.")
             # Sleep to next minute boundary to reduce CPU usage
-            now = datetime.utcnow()
-            sleep = 60 - now.second
+            # Use timezone-aware UTC now to avoid deprecation warnings
+            now_utc = datetime.now(timezone.utc)
+            sleep = 60 - now_utc.second
             time.sleep(max(1, min(sleep, 60)))
             if cfg.once:
                 # Exit after the first eligible check if configured
