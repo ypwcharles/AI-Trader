@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__/
+*.pyc
+logs/
+node_modules/
+.DS_Store
+.idea/
+.vscode/
+data/agent_data/
+docs/data/
+

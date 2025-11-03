@@ -1,0 +1,35 @@
+services:
+  app:
+    # Build locally on NAS (amd64). If building on Mac M1, consider buildx with --platform linux/amd64.
+    build: .
+    container_name: aitrader-app
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+      - MARKET_TZ=America/New_York
+      - MARKET_OPEN=09:30
+      - MARKET_CLOSE=16:00
+      - RUN_MINUTE=30       # 09:30, 10:30, ... 15:30
+      - PERIOD_MINUTES=60
+      - SKIP_HOLIDAYS=1
+      - CATCH_UP_OPEN=1
+      - SCHED_CONFIG=configs/default_config.json
+      - RUN_TODAY=1
+    volumes:
+      - ./:/app
+    command: ["python", "-u", "scripts/scheduler.py"]
+
+  web:
+    image: nginx:alpine
+    container_name: aitrader-web
+    ports:
+      - "8080:80"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./docs:/usr/share/nginx/html/docs:ro
+      - ./data:/usr/share/nginx/html/data:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
