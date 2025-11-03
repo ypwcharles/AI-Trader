@@ -11,6 +11,10 @@ data/agent_data/
 # Frontend local data (keep local only)
 docs/data/
 
+# Scheduler runtime state/lock
+data/.scheduler_state.json
+data/.run_all.lock
+
 # OS/Editor
 .DS_Store
 .idea/
@@ -19,4 +23,3 @@ docs/data/
 # Python cache
 __pycache__/
 *.pyc
-
