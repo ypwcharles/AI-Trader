@@ -84,6 +84,14 @@ def main() -> None:
 
     # 1) Fetch latest prices (yfinance)
     fetch_cmd = [sys.executable, str(DATA / "get_daily_price_yf.py")]
+    # Pass interval from env if provided (e.g., "60m" for hourly)
+    price_interval = os.getenv("PRICE_INTERVAL", "").strip()
+    if price_interval:
+        fetch_cmd += ["--interval", price_interval]
+        if price_interval != "1d":
+            period_days = os.getenv("PRICE_PERIOD_DAYS", "30").strip()
+            if period_days.isdigit():
+                fetch_cmd += ["--period-days", period_days]
     if start:
         fetch_cmd += ["--start", start]
     if end:
