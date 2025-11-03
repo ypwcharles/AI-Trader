@@ -6,6 +6,7 @@ class DataLoader {
         this.agentData = {};
         this.priceCache = {};
         this.config = null;
+        // Default from config; will be set in initialize()
         this.baseDataPath = './data';
     }
 
@@ -17,24 +18,69 @@ class DataLoader {
         }
     }
 
-    // Load all agent names from configuration
+    // Internal: fetch JSON with fallback between configured base and the alternate path
+    async _fetchJSONWithFallback(relativePath) {
+        const ts = Date.now();
+        const tryPaths = [this.baseDataPath, (this.baseDataPath === './data' ? '../data' : './data')];
+        let lastErr = null;
+        for (const base of tryPaths) {
+            try {
+                const url = `${base}/${relativePath}?t=${ts}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                // Update base on success
+                this.baseDataPath = base;
+                return data;
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Fetch failed');
+    }
+
+    // Internal: fetch text (for jsonl) with fallback
+    async _fetchTextWithFallback(relativePath) {
+        const ts = Date.now();
+        const tryPaths = [this.baseDataPath, (this.baseDataPath === './data' ? '../data' : './data')];
+        let lastErr = null;
+        for (const base of tryPaths) {
+            try {
+                const url = `${base}/${relativePath}?t=${ts}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const text = await res.text();
+                this.baseDataPath = base;
+                return text;
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Fetch failed');
+    }
+
+    // Load all agent names from configuration (restricted to DeepSeek Terminus)
     async loadAgentList() {
         // Ensure config is loaded
         await this.initialize();
 
         try {
-            const enabledAgents = window.configLoader.getEnabledAgents();
+            // Only keep DeepSeek Terminus regardless of other enabled agents
+            const enabledAgents = window.configLoader
+                .getEnabledAgents()
+                .filter(a => a.folder === 'deepseek-ai/DeepSeek-V3.1-Terminus');
             const agents = [];
 
             for (const agentConfig of enabledAgents) {
                 try {
                     console.log(`Checking agent: ${agentConfig.folder}`);
-                    const response = await fetch(`${this.baseDataPath}/agent_data/${agentConfig.folder}/position/position.jsonl`);
-                    if (response.ok) {
+                    // Probe file existence with fallback logic
+                    try {
+                        await this._fetchTextWithFallback(`agent_data/${agentConfig.folder}/position/position.jsonl`);
                         agents.push(agentConfig.folder);
                         console.log(`Added agent: ${agentConfig.folder}`);
-                    } else {
-                        console.log(`Agent ${agentConfig.folder} not found (status: ${response.status})`);
+                    } catch (probeErr) {
+                        console.log(`Agent ${agentConfig.folder} not found:`, probeErr.message);
                     }
                 } catch (e) {
                     console.log(`Agent ${agentConfig.folder} error:`, e.message);
@@ -51,10 +97,7 @@ class DataLoader {
     // Load position data for a specific agent
     async loadAgentPositions(agentName) {
         try {
-            const response = await fetch(`${this.baseDataPath}/agent_data/${agentName}/position/position.jsonl`);
-            if (!response.ok) throw new Error(`Failed to load positions for ${agentName}`);
-
-            const text = await response.text();
+            const text = await this._fetchTextWithFallback(`agent_data/${agentName}/position/position.jsonl`);
             const lines = text.trim().split('\n').filter(line => line.trim() !== '');
             const positions = lines.map(line => {
                 try {
@@ -81,10 +124,7 @@ class DataLoader {
 
         try {
             const priceFilePrefix = window.configLoader.getPriceFilePrefix();
-            const response = await fetch(`${this.baseDataPath}/${priceFilePrefix}${symbol}.json`);
-            if (!response.ok) throw new Error(`Failed to load price for ${symbol}`);
-
-            const data = await response.json();
+            const data = await this._fetchJSONWithFallback(`${priceFilePrefix}${symbol}.json`);
             // Support both hourly (60min) and daily data formats
             this.priceCache[symbol] = data['Time Series (60min)'] || data['Time Series (Daily)'];
             return this.priceCache[symbol];
@@ -94,13 +134,36 @@ class DataLoader {
         }
     }
 
+    // Load prices ensuring we have the best available for a specific date
+    async loadStockPriceEnsure(symbol, date) {
+        let prices = this.priceCache[symbol] || null;
+        const needRefetch = !prices || !prices[date] || prices[date]['4. close'] === undefined;
+        if (needRefetch) {
+            try {
+                const priceFilePrefix = window.configLoader.getPriceFilePrefix();
+                const data = await this._fetchJSONWithFallback(`${priceFilePrefix}${symbol}.json`);
+                this.priceCache[symbol] = data['Time Series (60min)'] || data['Time Series (Daily)'];
+                prices = this.priceCache[symbol];
+            } catch (e) {
+                console.error(`Error refreshing price for ${symbol}:`, e);
+            }
+        }
+        return prices;
+    }
+
     // Get closing price for a symbol on a specific date
     async getClosingPrice(symbol, date) {
-        const prices = await this.loadStockPrice(symbol);
+        const prices = await this.loadStockPriceEnsure(symbol, date);
         if (!prices || !prices[date]) {
             return null;
         }
-        return parseFloat(prices[date]['4. close']);
+        const close = prices[date]['4. close'];
+        if (close !== undefined && close !== null && close !== '') {
+            return parseFloat(close);
+        }
+        // Fallback: if close is not available (e.g., intraday), use today's buy price to estimate
+        const openBuy = prices[date]['1. buy price'] || prices[date]['1. open'];
+        return openBuy ? parseFloat(openBuy) : null;
     }
 
     // Calculate total asset value for a position on a given date
@@ -192,10 +255,7 @@ class DataLoader {
         try {
             console.log('Loading QQQ invesco data...');
             const benchmarkFile = window.configLoader.getBenchmarkFile();
-            const response = await fetch(`${this.baseDataPath}/${benchmarkFile}`);
-            if (!response.ok) throw new Error('Failed to load QQQ data');
-
-            const data = await response.json();
+            const data = await this._fetchJSONWithFallback(benchmarkFile);
             // Support both hourly (60min) and daily data formats
             const timeSeries = data['Time Series (60min)'] || data['Time Series (Daily)'];
             

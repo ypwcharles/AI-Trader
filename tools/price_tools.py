@@ -24,7 +24,10 @@ all_nasdaq_100_symbols = [
     "NXPI", "DDOG", "AXON", "ROST", "IDXX", "EA", "PCAR", "FAST", "EXC", "TTWO",
     "XEL", "ZS", "PAYX", "WBD", "BKR", "CPRT", "CCEP", "FANG", "TEAM", "CHTR",
     "KDP", "MCHP", "GEHC", "VRSK", "CTSH", "CSGP", "KHC", "ODFL", "DXCM", "TTD",
-    "ON", "BIIB", "LULU", "CDW", "GFS"
+    "ON", "BIIB", "LULU", "CDW", "GFS",
+    # Additional user-requested symbols
+    "BABA", "COIN", "HOOD", "IBIT", "ETHA", "ASTS", "RKLB", "RBLX", "FNMA",
+    "CRWV", "GLD", "SLV"
 ]
 
 def get_yesterday_date(today_date: str, merged_path: Optional[str] = None) -> str:

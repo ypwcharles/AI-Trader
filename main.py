@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import json
 from pathlib import Path
 from dotenv import load_dotenv
@@ -124,6 +124,50 @@ async def main(config_path=None):
         END_DATE = os.getenv("END_DATE")
         print(f"⚠️  Using environment variable to override END_DATE: {END_DATE}")
     
+    # Quick live mode: if RUN_TODAY is set, choose dates based on US market open (America/New_York by default)
+    run_today_flag = os.getenv("RUN_TODAY", "").strip().lower()
+    if run_today_flag in ("1", "true", "yes", "on"):        
+        from zoneinfo import ZoneInfo
+        try:
+            from tools.price_tools import get_yesterday_date
+        except Exception:
+            get_yesterday_date = None
+
+        market_tz = os.getenv("MARKET_TZ", "America/New_York")
+        market_open_str = os.getenv("MARKET_OPEN", "09:30")
+        try:
+            open_h, open_m = [int(x) for x in market_open_str.split(":", 1)]
+        except Exception:
+            open_h, open_m = 9, 30
+
+        now_market = datetime.now(ZoneInfo(market_tz))
+        open_market = now_market.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
+
+        # Provisional END_DATE is market calendar aware:
+        # - If weekend, use previous trading day
+        # - If before market open, use previous trading day
+        # - Else, use today (market date)
+        market_date_str = now_market.strftime("%Y-%m-%d")
+        end_candidate = market_date_str
+
+        is_weekend = now_market.weekday() >= 5  # 5=Sat, 6=Sun
+        before_open = now_market < open_market
+        if is_weekend or before_open:
+            if get_yesterday_date is not None:
+                end_candidate = get_yesterday_date(market_date_str)
+            else:
+                # Fallback: simple previous day, may land on weekend
+                end_candidate = (datetime.strptime(market_date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # INIT_DATE should be the previous trading day of END_DATE
+        if get_yesterday_date is not None:
+            INIT_DATE = get_yesterday_date(end_candidate)
+        else:
+            INIT_DATE = (datetime.strptime(end_candidate, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        END_DATE = end_candidate
+        state = "pre-open/weekend" if (is_weekend or before_open) else "regular-hours/post-open"
+        print(f"⚡ Live mode (RUN_TODAY). Market TZ={market_tz}, state={state}. INIT_DATE={INIT_DATE}, END_DATE={END_DATE}")
+
     # Validate date range
     # Support both YYYY-MM-DD and YYYY-MM-DD HH:MM:SS formats
     if ' ' in INIT_DATE:
@@ -259,4 +303,3 @@ if __name__ == "__main__":
         print(f"📄 Using default configuration file: configs/default_config.json")
     
     asyncio.run(main(config_path))
-

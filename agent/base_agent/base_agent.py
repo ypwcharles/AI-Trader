@@ -52,7 +52,10 @@ class BaseAgent:
         "NXPI", "DDOG", "AXON", "ROST", "IDXX", "EA", "PCAR", "FAST", "EXC", "TTWO",
         "XEL", "ZS", "PAYX", "WBD", "BKR", "CPRT", "CCEP", "FANG", "TEAM", "CHTR",
         "KDP", "MCHP", "GEHC", "VRSK", "CTSH", "CSGP", "KHC", "ODFL", "DXCM", "TTD",
-        "ON", "BIIB", "LULU", "CDW", "GFS"
+        "ON", "BIIB", "LULU", "CDW", "GFS",
+        # Additional user-requested symbols
+        "BABA", "COIN", "HOOD", "IBIT", "ETHA", "ASTS", "RKLB", "RBLX", "FNMA",
+        "CRWV", "GLD", "SLV"
     ]
     
     def __init__(
@@ -124,22 +127,23 @@ class BaseAgent:
         
     def _get_default_mcp_config(self) -> Dict[str, Dict[str, Any]]:
         """Get default MCP configuration"""
+        host = os.getenv('MCP_HOST', '127.0.0.1')
         return {
             "math": {
                 "transport": "streamable_http",
-                "url": f"http://localhost:{os.getenv('MATH_HTTP_PORT', '8000')}/mcp",
+                "url": f"http://{host}:{os.getenv('MATH_HTTP_PORT', '8000')}/mcp",
             },
             "stock_local": {
                 "transport": "streamable_http",
-                "url": f"http://localhost:{os.getenv('GETPRICE_HTTP_PORT', '8003')}/mcp",
+                "url": f"http://{host}:{os.getenv('GETPRICE_HTTP_PORT', '8003')}/mcp",
             },
             "search": {
                 "transport": "streamable_http",
-                "url": f"http://localhost:{os.getenv('SEARCH_HTTP_PORT', '8001')}/mcp",
+                "url": f"http://{host}:{os.getenv('SEARCH_HTTP_PORT', '8001')}/mcp",
             },
             "trade": {
                 "transport": "streamable_http",
-                "url": f"http://localhost:{os.getenv('TRADE_HTTP_PORT', '8002')}/mcp",
+                "url": f"http://{host}:{os.getenv('TRADE_HTTP_PORT', '8002')}/mcp",
             },
         }
     
@@ -206,18 +210,30 @@ class BaseAgent:
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
     
     async def _ainvoke_with_retry(self, message: List[Dict[str, str]]) -> Any:
-        """Agent invocation with retry"""
+        """Agent invocation with retry and detailed error reporting (handles ExceptionGroup)."""
         for attempt in range(1, self.max_retries + 1):
             try:
                 return await self.agent.ainvoke(
-                    {"messages": message}, 
+                    {"messages": message},
                     {"recursion_limit": 100}
                 )
             except Exception as e:
-                if attempt == self.max_retries:
-                    raise e
+                # Enhanced diagnostics for nested async/task errors
+                import traceback, sys
                 print(f"⚠️ Attempt {attempt} failed, retrying after {self.base_delay * attempt} seconds...")
-                print(f"Error details: {e}")
+                print(f"Error type: {type(e).__name__}: {e}")
+                # Python 3.11+ ExceptionGroup support
+                inner = getattr(e, "exceptions", None)
+                if isinstance(inner, (list, tuple)) and inner:
+                    for i, sub in enumerate(inner, 1):
+                        print(f" ├─ Sub-exception[{i}] {type(sub).__name__}: {sub}")
+                        tb = "".join(traceback.format_exception(type(sub), sub, sub.__traceback__))
+                        print(tb)
+                else:
+                    tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                    print(tb)
+                if attempt == self.max_retries:
+                    raise
                 await asyncio.sleep(self.base_delay * attempt)
     
     async def run_trading_session(self, today_date: str) -> None:

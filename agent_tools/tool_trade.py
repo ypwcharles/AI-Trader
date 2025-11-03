@@ -110,8 +110,8 @@ def buy(symbol: str, amount: int) -> Dict[str, Any]:
         # Decrease cash balance
         new_position["CASH"] = cash_left
         
-        # Increase stock position quantity
-        new_position[symbol] += amount
+        # Increase stock position quantity (allow new symbols not present in initial snapshot)
+        new_position[symbol] = new_position.get(symbol, 0) + amount
         
         # Step 6: Record transaction to position.jsonl file
         # Build file path: {project_root}/data/agent_data/{signature}/position/position.jsonl
