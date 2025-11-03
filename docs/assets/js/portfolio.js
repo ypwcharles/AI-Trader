@@ -86,11 +86,30 @@ function updateMetrics(data) {
     const cashPosition = latestPosition && latestPosition.positions ? latestPosition.positions.CASH || 0 : 0;
     const totalTrades = data.positions ? data.positions.filter(p => p.this_action).length : 0;
 
+    // Last updated timestamp (from asset history)
+    const lastDate = data.assetHistory && data.assetHistory.length > 0 ? data.assetHistory[data.assetHistory.length - 1].date : null;
+    let lastUpdatedText = 'N/A';
+    if (lastDate) {
+        if (lastDate.includes(':')) {
+            const dt = new Date(lastDate);
+            lastUpdatedText = dt.toLocaleString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+        } else {
+            lastUpdatedText = lastDate;
+        }
+    }
+
     document.getElementById('totalAsset').textContent = dataLoader.formatCurrency(totalAsset);
     document.getElementById('totalReturn').textContent = dataLoader.formatPercent(totalReturn);
     document.getElementById('totalReturn').className = `metric-value ${totalReturn >= 0 ? 'positive' : 'negative'}`;
     document.getElementById('cashPosition').textContent = dataLoader.formatCurrency(cashPosition);
     document.getElementById('totalTrades').textContent = totalTrades;
+    const elUpdated = document.getElementById('lastUpdatedPortfolio');
+    if (elUpdated) {
+        elUpdated.textContent = lastUpdatedText;
+    }
 }
 
 // Update holdings table

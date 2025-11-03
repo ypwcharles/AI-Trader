@@ -63,6 +63,9 @@ async function init() {
         // Update stats
         updateStats();
 
+        // Update last updated timestamp
+        updateLastUpdated();
+
         // Create chart
         createChart();
 
@@ -140,6 +143,34 @@ function updateStats() {
         dataLoader.getAgentDisplayName(bestAgent) : 'N/A';
     document.getElementById('avg-return').textContent = bestAgent ?
         dataLoader.formatPercent(bestReturn) : 'N/A';
+}
+
+// Update "Last Updated" indicator under page header
+function updateLastUpdated() {
+    const el = document.getElementById('lastUpdated');
+    if (!el) return;
+    let maxDate = null;
+    Object.values(allAgentsData).forEach(d => {
+        const hist = d && d.assetHistory || [];
+        if (hist.length > 0) {
+            const last = hist[hist.length - 1].date;
+            if (!maxDate || last > maxDate) maxDate = last;
+        }
+    });
+    if (!maxDate) {
+        el.textContent = 'Last Updated: N/A';
+        return;
+    }
+    // Friendly format
+    let formatted = maxDate;
+    if (maxDate.includes(':')) {
+        const dt = new Date(maxDate);
+        formatted = dt.toLocaleString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+    el.textContent = `Last Updated: ${formatted}`;
 }
 
 // Create the main chart
